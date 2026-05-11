@@ -22,8 +22,9 @@ router.get('/:id', requireAuth, (req, res) => {
   const server = db.prepare('SELECT * FROM servers WHERE id = ? AND owner_id = ?').get(req.params.id, req.user.id)
   if (!server) return res.status(404).json({ error: 'Not found' })
 
-  const latest = db.prepare('SELECT * FROM stats WHERE server_id = ? ORDER BY ts DESC LIMIT 1').get(server.id)
-  const today  = Math.floor(Date.now()/1000) - 86400
+  const latest   = db.prepare('SELECT * FROM stats WHERE server_id = ? ORDER BY ts DESC LIMIT 1').get(server.id)
+  const platform = db.prepare('SELECT * FROM platform_info WHERE server_id = ?').get(server.id)
+  const today    = Math.floor(Date.now()/1000) - 86400
 
   const joins_today    = db.prepare('SELECT COUNT(*) as c FROM player_events WHERE server_id=? AND event_type="player_join" AND ts>?').get(server.id,today)?.c??0
   const leaves_today   = db.prepare('SELECT COUNT(*) as c FROM player_events WHERE server_id=? AND event_type="player_leave" AND ts>?').get(server.id,today)?.c??0
@@ -33,12 +34,8 @@ router.get('/:id', requireAuth, (req, res) => {
   const commands_today = db.prepare('SELECT COUNT(*) as c FROM command_events WHERE server_id=? AND ts>?').get(server.id,today)?.c??0
   const peak_today     = db.prepare('SELECT MAX(player_count) as m FROM stats WHERE server_id=? AND ts>?').get(server.id,today)?.m??0
   const unique_today   = db.prepare('SELECT COUNT(DISTINCT player_name) as c FROM player_events WHERE server_id=? AND event_type="player_join" AND ts>?').get(server.id,today)?.c??0
+  const avg_session    = joins_today>0&&leaves_today>0 ? `${Math.max(1,Math.round((leaves_today/joins_today)*5))}m` : '—'
 
-  // Avg session: total uptime for joined players today / joins
-  const avg_session = joins_today > 0 && leaves_today > 0
-    ? `${Math.round((leaves_today/joins_today)*10)}m` : '—'
-
-  const recent_events   = db.prepare('SELECT * FROM player_events WHERE server_id=? ORDER BY ts DESC LIMIT 50').all(server.id)
   const recent_deaths   = db.prepare('SELECT * FROM death_events WHERE server_id=? ORDER BY ts DESC LIMIT 50').all(server.id)
   const recent_kills    = db.prepare('SELECT * FROM kill_events WHERE server_id=? ORDER BY ts DESC LIMIT 50').all(server.id)
   const recent_commands = db.prepare('SELECT * FROM command_events WHERE server_id=? ORDER BY ts DESC LIMIT 50').all(server.id)
@@ -50,8 +47,21 @@ router.get('/:id', requireAuth, (req, res) => {
     max_players: latest?.max_players??0, uptime_seconds: latest?.uptime_seconds??0,
     memory_used: latest?.memory_used??0, memory_max: latest?.memory_max??0,
     mspt: latest?.mspt??null, last_seen: latest?.ts??null,
-    joins_today, leaves_today, deaths_today, kills_today, chats_today, commands_today, peak_today, unique_today, avg_session,
-    recent_events, recent_deaths, recent_kills, recent_commands,
+    cpu: {
+      process_pct: latest?.cpu_process??null, system_pct: latest?.cpu_system??null,
+      phys_used: latest?.phys_used??0, phys_total: latest?.phys_total??0,
+      swap_used: latest?.swap_used??0, swap_total: latest?.swap_total??0,
+      disk_used: latest?.disk_used??0, disk_total: latest?.disk_total??0,
+    },
+    platform: platform ? {
+      server_software: platform.server_software, server_version: platform.server_version,
+      mc_version: platform.mc_version, online_mode: platform.online_mode===1,
+      os: platform.os, cpu_name: platform.cpu_name,
+      java_version: platform.java_version, jvm: platform.jvm,
+    } : {},
+    joins_today, leaves_today, deaths_today, kills_today, chats_today, commands_today,
+    peak_today, unique_today, avg_session,
+    recent_deaths, recent_kills, recent_commands,
   })
 })
 
@@ -67,7 +77,7 @@ router.post('/:id/rename', requireAuth, (req, res) => {
 router.get('/:id/graph', requireAuth, (req, res) => {
   const server = db.prepare('SELECT * FROM servers WHERE id=? AND owner_id=?').get(req.params.id, req.user.id)
   if (!server) return res.status(404).json({ error: 'Not found' })
-  const metric = ['tps','player_count','memory_used','mspt'].includes(req.query.metric) ? req.query.metric : 'tps'
+  const metric = ['tps','player_count','memory_used','mspt','cpu_process','cpu_system'].includes(req.query.metric) ? req.query.metric : 'tps'
   const range  = parseInt(req.query.range)||3600
   const since  = Math.floor(Date.now()/1000)-range
   const bucket = Math.max(Math.floor(range/60),10)
