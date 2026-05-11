@@ -2,7 +2,6 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const { getDb } = require('./db')
-const { onBackendStart } = require('./discord')
 
 const app = express()
 
@@ -16,15 +15,15 @@ app.use('/api/auth',    require('./routes/auth'))
 app.use('/api/servers', require('./routes/servers'))
 app.use('/api/events',  require('./routes/events'))
 app.use('/api/link',    require('./routes/link'))
+app.use('/api/admin',   require('./routes/admin'))
 
 const PORT = process.env.PORT || 3001
 
 getDb().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`PulseMC backend running on http://localhost:${PORT}`)
-    onBackendStart().catch(console.error)
   })
 }).catch(err => {
-  console.error('Failed to init database:', err)
+  console.error('DB init failed:', err)
   process.exit(1)
 })
